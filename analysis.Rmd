@@ -1,0 +1,1014 @@
+---
+title: "Group and Idiographic DSEM: DTECT Study"
+date: "Updated `r Sys.Date()`"
+author: "Mindy Ross"
+output: html_document
+---
+
+# Libraries and Global Options
+
+```{r setup, include=FALSE}
+rm(list=ls()) 
+
+library(psych)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(MplusAutomation)
+library(forcats)
+library(tableone)
+```
+
+# Load and prepare data
+
+```{r}
+# Read in all EMA data
+ema_data <- read.csv("~/data/all_emas_X.csv") %>%
+                arrange(uid, timestamp) %>% group_by(uid) %>% mutate(survey = seq(1:n()))
+
+# process dataframe for DSEM in Mplus
+mplus_data <- ema_data %>% group_by(uid) %>%
+  mutate(clock = timestamp - first(timestamp),
+         survey = recode(ema_type, "first" = 1, "second" = 2, "last" = 3)) %>%
+  rename(day = VETTED_STUDY_DAY, PAIN = PAIN_LEVEL, CAT = PAIN_THOUGHTS, INTERF = PAIN_INTERFERENCE, NICOTINE = SAR_NOW_NICOTINE, ALCOHOL = SAR_NOW_ALCOHOL) %>% rowwise() %>%
+  mutate(CRAVE = max(c_across(CRAVING_HEROIN:CRAVING_METH)),
+         USE = max(c_across(HR_USED_HEROIN:HR_USED_ANY_OPIOID))) %>%
+  select(uid, clock, day, survey, PAIN, CAT, INTERF, CRAVE, USE, NICOTINE, ALCOHOL) %>%
+  group_by(uid, day) %>% mutate(lag = clock - lag(clock)) %>%
+  group_by(uid) %>%
+  filter(max(PAIN,na.rm = T) > 2) #remove people with max pain < 3
+
+# replace missing EMA questions with 0 when pain == 0
+mplus_data_nomiss <- mplus_data %>% mutate_at(vars(CAT:INTERF), ~ifelse(PAIN==0,0,.))
+# replace remaining NA with -99
+mplus_data_nomiss[is.na(mplus_data_nomiss)] <- -99
+```
+
+# Group Level Model: Crave, Pain, Cat
+
+```{r}
+# MPLUS MODEL INPUT
+
+# DATA:
+# FILE = "MplusOutput/mldsem5_91641670de69b4b4611271d3d88f0ac7.dat";
+#  
+# VARIABLE:
+# NAMES = uid day PAIN CAT INTERF CRAVE clock; 
+#  MISSING=.;
+#  USEVARIABLES = uid, day, clock, CRAVE, PAIN, CAT;
+#               CLUSTER = uid;
+#               Tinterval = clock (1); !define 4 hour lag
+#               LAGGED = CRAVE(1) PAIN(1) CAT(1);
+#               WITHIN = day;
+#   USEOBSERVATIONS =  CRAVE  PAIN CAT EQ _CLUSVAR;
+# DEFINE:
+# standardize  CRAVE  PAIN CAT;
+#   day = day/30;
+# ANALYSIS:
+# TYPE = TWOLEVEL RANDOM;
+#             ESTIMATOR = BAYES;
+#             PROC = 4;
+#             FBITER = 20000;
+#             BSEED = 222;
+# MODEL:
+#   %WITHIN%
+# 
+#     !time effects
+#     dcrave | CRAVE on day;
+#     dcat | CAT on day;
+#     dpain | PAIN on day;
+#   
+#     !autoregressive effects
+#     cravear1 | CRAVE on CRAVE&1;
+#     painar1 | PAIN ON PAIN&1;
+#     CATar1 | CAT ON CAT&1;
+# 
+#     !lagged effects
+#     craveonpain | CRAVE on PAIN&1;
+#     craveoncat | CRAVE on CAT&1;
+#     
+#     painoncat | pain on cat&1;
+#     painoncrave | pain on crave&1;
+#     
+#     catonpain | cat on pain&1;
+#     catoncrave | cat on crave&1;
+#     
+#     !residual variance
+#     logv1 | CRAVE;
+#     logv3 | PAIN;
+#     logv4 | CAT;
+# 
+#     !define covariances
+#     cor2 | CRAVE WITH PAIN;
+#     cor3 | CRAVE WITH CAT;
+#     cor6 | PAIN WITH CAT;
+# 
+#     day;
+# 
+#     %BETWEEN%
+#     CRAVE;
+#     pain;
+#     cat;
+#     dcrave;
+#     cravear1;
+#     painar1;
+#     catar1;
+#     craveonpain-catoncrave;
+#     logv1;
+#     logv3;
+#     logv4;
+#     cor2;
+#     cor3;
+#     cor6@0;
+# 
+# OUTPUT:
+# stand TECH1 TECH8;
+#             residual(cluster);
+#             stand(cluster);
+# SAVEDATA:
+# file = dsem5.dat;
+#     save fscores(100);
+#     bparameters = bparam1.dat;
+# PLOT:
+# TYPE=PLOT2;
+
+# Extract group model output
+grpResultsFile <- "~/groupOutput/mldsem5.out"
+grpModel_results <- readModels(grpResultsFile, what = c("parameters","summaries"))
+grp_STDYXresults <- grpModel_results$parameters$stdyx.standardized
+grp_STDYXresults
+```
+
+# Idiographic Model 0: Crave
+
+```{r}
+# MPLUS MODEL INPUT
+
+# c[[init]]
+# iterators = uid;
+# uid =  116 118 127 134 161 163 176 222 224 228 
+# 247 271 295 301 304 313 332 335 339 348 367 
+# 387 389 391 398 429 442 444 448 459 489 505 
+# 532 534 536 552 559 563 572 619 621 652 676 
+# 689 716 717 741 749 766 791 792 815 831 855 
+# 856 873 892 901 906 942 986 993;
+# filename = "ID_[[uid]].inp"; 
+# outputDirectory = /idiographicOutput/m0;
+# [[/init]] 
+# 
+# TITLE:    UID [[uid]] idiographic model 0;
+# DATA:     FILE IS /data/mplus_data_nomiss.csv;
+# 
+# VARIABLE: NAMES = uid, clock, day, survey, PAIN, CAT, INTERF, 
+# 		  CRAVE, USE, lag;
+# 	  USEVARIABLES = clock, day, survey, CRAVE;
+#           Tinterval = clock (14400); !define 4 hour lag
+#           LAGGED = CRAVE(1);
+#   	  USEOBSERVATIONS = (uid == [[uid]]);
+# 	  MISSING = ALL (-99);
+# ANALYSIS: ESTIMATOR = BAYES;
+# 	  BITERATIONS = (20000);
+#           BSEED = 222;
+# DEFINE:   standardize CRAVE;
+#   	  day = day/30;
+# MODEL: 
+#     !time effects
+#     CRAVE on day;
+#     CRAVE on survey;
+# 
+#     !autoregressive effects
+#     CRAVE on CRAVE&1;
+# 
+#     !residual variance
+#     CRAVE;
+# 
+#     day;
+#     survey;
+# 
+# 
+# OUTPUT: stand TECH8;
+# SAVEDATA: file = dsem0_[[uid]].dat;
+#           bparameters = bparam0_[[uid]].dat;
+# PLOT: TYPE=PLOT2;
+
+# run Mplus model in R using R package MplusAutomation
+MplusAutomation::createModels("~/idiographicInput/m0input.txt")
+runModels("~/idiographicOutput/m0", recursive = T)
+```
+
+## Results
+
+```{r message = F, warning = F}
+m0Path <- '~/idiographicOutput/m0/'
+# get all model result parameters for all IDs
+m0Estimates <- readModels(m0Path, recursive = TRUE, what = "parameters")
+
+# reformat estimates df
+m0_allParameters <- do.call("rbind",sapply(m0Estimates,"[", "parameters")) %>%
+  as.data.frame()  
+
+# extract all R2 estimates for CRAVE
+m0_r2Results <-  plyr::ldply(m0_allParameters$r2, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID, param, est) %>%
+  group_by(ID) %>% filter(n() == 1) %>% ungroup()
+
+# extract all parameters from STDYX model results
+m0_STDYXresults <- plyr::ldply(m0_allParameters$stdyx.standardized, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID:sig)%>%
+  unite(label, paramHeader, param, sep = ".") %>% # combine paramHeader and param cols
+  # add sig_direction col (0 if CI includes 0, otherwise 1 for all +# and 0 for all -#)
+  mutate(sig_direction = ifelse(lower_2.5ci > 0 & upper_2.5ci > 0, 1, 0),
+         sig_direction = ifelse(lower_2.5ci < 0 & upper_2.5ci < 0, -1, sig_direction)) %>%
+  drop_na(c(posterior_sd:sig_direction))
+```
+
+## PSR
+
+```{r message = F, warning = F}
+m0Path <- '~/idiographicOutput/m0/'
+# get tech8 for all IDs
+m0tech8 <- readModels(m0Path, recursive = TRUE, what = "tech8")
+
+# reformat tech8 df
+m0_allPSR <- do.call("rbind",sapply(m0tech8,"[", "tech8")) %>%
+  as.data.frame()  
+
+# extract all PSRs
+m0_PSR <-  plyr::ldply(m0_allPSR$psr, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID, iteration, psr, param.highest.psr)
+
+# final PSR per ID
+m0_lastPSR <- m0_PSR %>% group_by(ID) %>%
+  summarise(lastPSR = last(psr),
+            flag = ifelse(lastPSR >= 1.1, 1, 0))
+
+# check if IDs with PSR > 1.1 are in model results
+m0_highPSR_list <- m0_lastPSR %>% filter(flag == 1) %>% pull(ID)
+m0_highPSR_list <- as.numeric(m0_highPSR_list)
+print(paste('Users with high PSR:',list(m0_highPSR_list)))
+m0_check_highPSR_ID <- m0_r2Results %>% mutate(flag_highPSR = m0_r2Results$ID %in% m0_highPSR_list)
+print(paste('IDs with high PSR and have R2 results: ',m0_check_highPSR_ID %>% filter(flag_highPSR == TRUE) %>% pull(ID)))
+```
+
+## Warnings/Errors
+
+```{r message = F, warning = F}
+m0_warn_err <- readModels(m0Path, recursive = TRUE, what = "warn_err")
+
+# Warnings
+m0_allWarn <- do.call("rbind", sapply(m0_warn_err, "[", "warnings")) %>%
+  as.data.frame() 
+m0_Warn <-  plyr::ldply(m0_allWarn$V1, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID,"1","2","3")
+print(paste("Warnings for users: ", list(m0_Warn$ID)))
+
+# check if IDs with Warnings are in model results
+m0_check_Warning_ID <- m0_r2Results %>% mutate(flag_warning = m0_r2Results$ID %in% list(m0_Warn$ID))
+print(paste('IDs with warnings and have R2 results: ',m0_check_Warning_ID %>% filter(flag_warning == TRUE) %>% pull(ID)))
+
+# Errors
+m0_allErr <- do.call("rbind", sapply(m0_warn_err, "[", "errors")) %>%
+  as.data.frame() 
+m0_Err <-  plyr::ldply(m0_allErr$V1, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID,"1","2","3")
+m0_Err
+```
+
+# Idiographic Model 1: Pain + Crave
+
+```{r}
+# MPLUS MODEL INPUT
+
+# c[[init]]
+# iterators = uid;
+# uid =  116 118 127 134 161 163 176 222 224 228 
+# 247 271 295 301 304 313 332 335 339 348 367 
+# 387 389 391 398 429 442 444 448 459 489 505 
+# 532 534 536 552 559 563 572 619 621 652 676 
+# 689 716 717 741 749 766 791 792 815 831 855 
+# 856 873 892 901 906 942 986 993;
+# filename = "ID_[[uid]].inp"; 
+# outputDirectory = /idiographicOutput/m1;
+# [[/init]] 
+# 
+# TITLE:    UID [[uid]] idiographic model 1;
+# DATA:     FILE IS /data/mplus_data_nomiss.csv;
+# 
+# VARIABLE: NAMES = uid, clock, day, survey, PAIN, CAT, INTERF, 
+# 		  CRAVE, USE, lag;
+# 	  USEVARIABLES = clock, day, survey, PAIN, CRAVE;
+#           Tinterval = clock (14400); !define 4 hour lag
+#           LAGGED = PAIN(1) CRAVE(1);
+#   	  USEOBSERVATIONS = (uid == [[uid]]);
+# 	  MISSING = ALL (-99);
+# ANALYSIS: ESTIMATOR = BAYES;
+# 	  BITERATIONS = (20000);
+#           BSEED = 222;
+# DEFINE:   standardize PAIN CRAVE;
+#   	  day = day/30;
+# MODEL: 
+#     !time effects
+#     PAIN on day;
+#     PAIN on survey;
+# 
+#     CRAVE on day;
+#     CRAVE on survey;
+# 
+#     !autoregressive effects
+#     PAIN on PAIN&1;
+#     CRAVE on CRAVE&1;
+# 
+#     !lagged effects
+#     PAIN on CRAVE&1;
+#     CRAVE on PAIN&1;
+# 
+#     !residual variance
+#     PAIN;
+#     CRAVE;
+# 
+#     !define covariances
+#     PAIN WITH CRAVE;
+# 
+#     day;
+#     survey;
+# 
+# OUTPUT: stand TECH8;
+# SAVEDATA: file = dsem1_[[uid]].dat;
+#           bparameters = bparam1_[[uid]].dat;
+# PLOT: TYPE=PLOT2;
+
+
+# run Mplus model in R using R package MplusAutomation
+MplusAutomation::createModels("~/idiographicInput/m1input.txt") # point it to the right folder (where your .txt file with mplus input is located)
+runModels("~/idiographicOutput/m1", recursive = T)
+```
+
+## Results
+
+```{r message = F, warning = F}
+m1Path <- '~/idiographicOutput/m1/'
+# get all model result parameters for all IDs
+m1Estimates <- readModels(m1Path, recursive = TRUE, what = "parameters")
+
+# reformat estimates df
+m1_allParameters <- do.call("rbind",sapply(m1Estimates,"[", "parameters")) %>%
+  as.data.frame()  
+
+# extract all R2 estimates
+m1_r2Results <-  plyr::ldply(m1_allParameters$r2, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID, param, est) %>%
+  group_by(ID) %>% filter(n() ==2) %>% ungroup() %>% 
+  filter(!ID %in% m0_highPSR_list)
+
+# extract all parameters from STDYX model results
+m1_STDYXresults <- plyr::ldply(m1_allParameters$stdyx.standardized, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID:sig)%>%
+  unite(label, paramHeader, param, sep = ".") %>% # combine paramHeader and param cols
+  # add sig_direction col (0 if CI includes 0, otherwise 1 for all +# and 0 for all -#)
+  mutate(sig_direction = ifelse(lower_2.5ci > 0 & upper_2.5ci > 0, 1, 0),
+         sig_direction = ifelse(lower_2.5ci < 0 & upper_2.5ci < 0, -1, sig_direction)) %>%
+  drop_na(c(posterior_sd:sig_direction)) %>% 
+  filter(!ID %in% m0_highPSR_list)
+```
+
+## PSR
+
+```{r message = F, warning = F}
+m1Path <- '~/idiographicOutput/m1/'
+# get tech8 for all IDs
+m1tech8 <- readModels(m1Path, recursive = TRUE, what = "tech8")
+
+# reformat tech8 df
+m1_allPSR <- do.call("rbind",sapply(m1tech8,"[", "tech8")) %>%
+  as.data.frame()  
+
+# extract all PSRs
+m1_PSR <-  plyr::ldply(m1_allPSR$psr, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID, iteration, psr, param.highest.psr)
+
+# final PSR per ID
+m1_lastPSR <- m1_PSR %>% group_by(ID) %>%
+  summarise(lastPSR = last(psr),
+            flag = ifelse(lastPSR >= 1.1, 1, 0))
+
+# check if IDs with PSR > 1.1 are in model results
+m1_highPSR_list <- m1_lastPSR %>% filter(flag == 1) %>% pull(ID)
+print(paste('Users with high PSR:',list(m1_highPSR_list)))
+m1_check_highPSR_ID <- m1_r2Results %>% mutate(flag_highPSR = m1_r2Results$ID %in% m1_highPSR_list)
+print(paste('IDs with high PSR and have R2 results: ', m1_check_highPSR_ID %>% filter(flag_highPSR == TRUE) %>% pull(ID)))
+```
+
+## Warnings/Errors
+
+```{r message = F, warning = F}
+m1_warn_err <- readModels(m1Path, recursive = TRUE, what = "warn_err")
+
+# Warnings
+m1_allWarn <- do.call("rbind", sapply(m1_warn_err, "[", "warnings")) %>%
+  as.data.frame() 
+m1_Warn <-  plyr::ldply(m1_allWarn$V1, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID,"1","2","3")
+print(paste("Warnings for users: ", list(m1_Warn$ID)))
+
+# check if IDs with Warnings are in model results
+m1_check_Warning_ID <- m1_r2Results %>% mutate(flag_warning = m1_r2Results$ID %in% list(m1_Warn$ID))
+print(paste('IDs with warnings and have R2 results: ',m1_check_Warning_ID %>% filter(flag_warning == TRUE) %>% pull(ID)))
+
+# Errors
+m1_allErr <- do.call("rbind", sapply(m1_warn_err, "[", "errors")) %>%
+  as.data.frame() 
+m1_Err <-  plyr::ldply(m1_allErr$V1, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID,"1","2","3")
+m1_Err
+```
+
+# Idiographic Model 2: Pain + Cat + Crave
+
+```{r}
+# MPLUS MODEL INPUT
+
+# c[[init]]
+# iterators = uid;
+# uid =  116 118 127 134 161 163 176 222 224 228 
+# 247 271 295 301 304 313 332 335 339 348 367 
+# 387 389 391 398 429 442 444 448 459 489 505 
+# 532 534 536 552 559 563 572 619 621 652 676 
+# 689 716 717 741 749 766 791 792 815 831 855 
+# 856 873 892 901 906 942 986 993;
+# filename = "ID_[[uid]].inp"; 
+# outputDirectory = /idiographicOutput/m2;
+# [[/init]] 
+# 
+# TITLE:    UID [[uid]] idiographic model 2;
+# DATA:     FILE IS /data/mplus_data_nomiss.csv;
+# 
+# VARIABLE: NAMES = uid, clock, day, survey, PAIN, CAT, INTERF, 
+# 		  CRAVE, USE, lag;
+# 	  USEVARIABLES = clock, day, survey, PAIN, CAT, CRAVE;
+#           Tinterval = clock (14400); !define 4 hour lag
+#           LAGGED = PAIN(1) CAT(1) CRAVE(1);
+#   	  USEOBSERVATIONS = (uid == [[uid]]);
+# 	  MISSING = ALL (-99);
+# ANALYSIS: ESTIMATOR = BAYES;
+# 	  BITERATIONS = (20000);
+#           BSEED = 222;
+# DEFINE:   standardize PAIN CAT CRAVE;
+#   	  day = day/30;
+# MODEL: 
+#     !time effects
+#     CRAVE on day;
+#     CRAVE on survey;
+#     
+#     CAT on day;
+#     CAT on survey;
+# 
+#     PAIN on day;
+#     PAIN on survey;
+# 
+#     !autoregressive effects
+#     CRAVE on CRAVE&1;
+#     CAT ON CAT&1;
+#     PAIN ON PAIN&1;
+# 
+#     !lagged effects
+#     CRAVE on CAT&1;
+#     CRAVE on PAIN&1;
+# 
+#     !residual variance
+#     CRAVE;
+#     CAT;
+#     PAIN;
+# 
+#     !define covariances
+#     CRAVE WITH CAT;
+#     CRAVE WITH PAIN;
+#     PAIN WITH CAT;
+# 
+#     day;
+#     survey;
+# 
+# OUTPUT: stand TECH8;
+# SAVEDATA: file = dsem2_[[uid]].dat;
+#           bparameters = bparam2_[[uid]].dat;
+# PLOT: TYPE=PLOT2;
+
+
+# run Mplus model in R using R package MplusAutomation
+MplusAutomation::createModels("~/idiographicInput/m2input.txt") # point it to the right folder (where your .txt file with mplus input is located)
+runModels("~/idiographicOutput/m2", recursive = T)
+```
+
+## Results
+
+```{r message = F, warning = F}
+m2Path <- '~/idiographicOutput/m2/'
+# get all model result parameters for all IDs
+m2Estimates <- readModels(m2Path, recursive = TRUE, what = "parameters")
+
+# reformat estimates df
+m2_allParameters <- do.call("rbind",sapply(m2Estimates,"[", "parameters")) %>%
+  as.data.frame()  
+
+# extract all R2 estimates
+m2_r2Results <-  plyr::ldply(m2_allParameters$r2, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID, param, est) %>%
+  group_by(ID) %>% filter(n() ==3) %>% ungroup() %>% 
+  filter(!ID %in% m0_highPSR_list)
+
+# extract all parameters from STDYX model results
+m2_STDYXresults <- plyr::ldply(m2_allParameters$stdyx.standardized, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID:sig)%>%
+  unite(label, paramHeader, param, sep = ".") %>% # combine paramHeader and param cols
+  # add sig_direction col (0 if CI includes 0, otherwise 1 for all +# and 0 for all -#)
+  mutate(sig_direction = ifelse(lower_2.5ci > 0 & upper_2.5ci > 0, 1, 0),
+         sig_direction = ifelse(lower_2.5ci < 0 & upper_2.5ci < 0, -1, sig_direction)) %>%
+  drop_na(c(posterior_sd:sig_direction)) %>% 
+  filter(!ID %in% m0_highPSR_list)
+```
+
+## PSR
+
+```{r message = F, warning = F}
+m2Path <- '~/idiographicOutput/m2/'
+# get tech8 for all IDs
+m2tech8 <- readModels(m2Path, recursive = TRUE, what = "tech8")
+
+# reformat tech8 df
+m2_allPSR <- do.call("rbind",sapply(m2tech8,"[", "tech8")) %>%
+  as.data.frame()  
+
+# extract all PSRs
+m2_PSR <-  plyr::ldply(m2_allPSR$psr, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID, iteration, psr, param.highest.psr)
+
+# final PSR per ID
+m2_lastPSR <- m2_PSR %>% group_by(ID) %>%
+  summarise(lastPSR = last(psr),
+            flag = ifelse(lastPSR >= 1.1, 1, 0))
+
+# check if IDs with PSR > 1.1 are in model results
+m2_highPSR_list <- m2_lastPSR %>% filter(flag == 1) %>% pull(ID)
+print(paste('Users with high PSR:',list(m2_highPSR_list)))
+m2_check_highPSR_ID <- m2_r2Results %>% mutate(flag_highPSR = m2_r2Results$ID %in% m2_highPSR_list)
+print(paste('IDs with high PSR and have R2 results: ',m2_check_highPSR_ID %>% filter(flag_highPSR == TRUE) %>% pull(ID)))
+```
+
+## Warnings/Errors
+
+```{r message = F, warning = F}
+m2_warn_err <- readModels(m2Path, recursive = TRUE, what = "warn_err")
+
+# Warnings
+m2_allWarn <- do.call("rbind", sapply(m2_warn_err, "[", "warnings")) %>%
+  as.data.frame() 
+m2_Warn <-  plyr::ldply(m2_allWarn$V1, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID,"1","2","3")
+print(paste("Warnings for users: ", list(m2_Warn$ID)))
+
+# check if IDs with Warnings are in model results
+m2_check_Warning_ID <- m2_r2Results %>% mutate(flag_warning = m2_r2Results$ID %in% list(m2_Warn$ID))
+print(paste('IDs with warnings and have R2 results: ',m2_check_Warning_ID %>% filter(flag_warning == TRUE) %>% pull(ID)))
+
+# Errors
+m2_allErr <- do.call("rbind", sapply(m2_warn_err, "[", "errors")) %>%
+  as.data.frame() 
+m2_Err <-  plyr::ldply(m2_allErr$V1, rbind) %>%
+  separate(.id, c("X", "ID1"), sep = "ID_", remove = F) %>% # get ID from col values
+  separate(ID1, c("ID")) %>%
+  select(ID,"1","2","3")
+m2_Err
+```
+
+# R2 model comparison for idiographic models
+
+## Between 
+
+```{r}
+# get parameter estimates for each idiographic model across all participants' models
+m0_R2_summary <- m0_r2Results %>% group_by(param) %>% do(describe(.$est)) %>% mutate(model = 0) %>% relocate(model, .before = 1)
+m1_R2_summary <- m1_r2Results %>% group_by(param) %>% do(describe(.$est)) %>% mutate(model = 1) %>% relocate(model, .before = 1)
+m2_R2_summary <- m2_r2Results %>% group_by(param) %>% do(describe(.$est)) %>% mutate(model = 2) %>% relocate(model, .before = 1)
+
+# combine parameter summaries
+allR2_summary <- as.data.frame(rbind(m0_R2_summary,m1_R2_summary,m2_R2_summary))
+allR2_summary <- allR2_summary %>% arrange(param)
+allR2_summary
+```
+
+## Within
+
+```{r}
+# merge individual model estimates per person and per model
+m0m1_r2Results <- merge(m0_r2Results, m1_r2Results, by = c("ID", "param"), all = TRUE)
+all_r2Results <- merge(m0m1_r2Results, m2_r2Results, by = c("ID", "param"), all = TRUE) %>% 
+                rename(m0 = est.x,
+                       m1 = est.y,
+                       m2 = est)
+
+# Compare R2 across models per person and add flag if successive increase in model fits
+all_R2_crave <- all_r2Results %>% 
+          mutate(flag = ifelse(m1 > m0 & m2 > m1, 1, 0),
+                 flag = ifelse(if_any(c(m0,m1,m2), is.na), NA, flag),
+                 flag = ifelse((m2-m0) < 0.05, 0, flag),
+                 m_0_1_diff = m1-m0,
+                 m_1_2_diff = m2-m1) %>%
+          # only examine crave
+          filter(param=='CRAVE') %>% 
+          # remove participants without 3 models
+          filter(!is.na(flag)) %>% 
+          rename(uid = ID) %>% mutate(uid = as.numeric(uid))
+
+# number of IDs that consistently increased (1) vs. not (0)
+tab_flag <- table(all_R2_crave$param, all_R2_crave$flag)
+tab_flag
+
+# list IDs with increasing
+print(all_R2_crave %>% filter(flag == 1))
+
+# list IDs with R2 not increasing
+print(all_R2_crave %>% filter(flag == 0))
+```
+
+# Table of all idiographic model parameter results
+
+```{r}
+# Model 0: CRAVE
+m0_estTable <- m0_STDYXresults %>% group_by(label) %>% 
+                  summarise(est_mean = mean(est),
+                            est_sd = sd(est),
+                            pval_mean = mean(pval),
+                            pval_sd = sd(pval))
+m0_estTable
+
+# Model 1: PAIN + CRAVE
+m1_estTable <- m1_STDYXresults %>% group_by(label) %>% 
+                  summarise(est_mean = mean(est),
+                            est_sd = sd(est),
+                            pval_mean = mean(pval),
+                            pval_sd = sd(pval))
+m1_estTable
+
+# Model 2: PAIN + CAT + CRAVE
+m2_estTable <- m2_STDYXresults %>% group_by(label) %>% 
+                  summarise(est_mean = mean(est),
+                            est_sd = sd(est),
+                            pval_mean = mean(pval),
+                            pval_sd = sd(pval))
+m2_estTable
+```
+
+# Tables and Figures
+
+Flag:
+
+- 1: R2 increase from m0 -> m1 -> m2
+- 0: R2 did not consistently increase from m0 -> m1 -> m2
+
+## Participant Demographics
+
+```{r}
+# participant demographics
+demo_file <- read.csv("~/data/DSEM_participant_demographics.csv")
+
+dfMplus <- mplus_data_nomiss %>%
+  mutate(across(everything(), ~ na_if(., -99))) %>%  # replace -99 with NA
+  left_join(all_R2_crave, by = "uid") %>%
+  filter(
+    uid != as.numeric(m0_highPSR_list),  # remove high PSR uids
+    !is.na(flag)                         # keep only rows with R2 results
+  ) %>%
+  mutate(R2_flag = as.factor(flag))
+
+# remove surveys with NA for PAIN, CAT, CRAVE
+dfMplus_clean <- dfMplus %>%
+  filter(if_all(c(PAIN, CAT, CRAVE), ~ !is.na(.)))   
+
+# list of participant IDs
+participant_ls <- unique(dfMplus_clean$uid)
+
+# participant demographics table
+demo_table_uid <- dfMplus_clean %>% left_join(demo_file, by = "uid") %>%
+              group_by(uid) %>%
+              summarise(age = unique(age),
+                        gender = factor(unique(gender_code)), # M = 1, F = 2, Non-binary = 3, Transgender = 4
+                        raceW = factor(unique(ifelse(race_white == "Y", 1, 0))), # White = 1, other = 0
+                        wks_bup = unique(weeks_on_bup_priorStart),
+                        numEMA = n(),
+                        maxDays = max(day),
+                        avgPain_perSubj = mean(PAIN),
+                        avgCat_perSubj = mean(CAT),
+                        avgCrave_perSubj = mean(CRAVE)) %>% 
+  ungroup()
+demo_table <- CreateTableOne(data = subset(demo_table_uid, select = -uid))
+print(demo_table, quote = FALSE, noSpaces = TRUE)
+```
+
+## Plot of average EMA ratings
+
+```{r}
+# plot of overall means and person means for pain/cat/crave
+person_stats <- demo_table_uid %>% select(-age, -gender, -raceW, -wks_bup, -numEMA, -maxDays) %>% 
+                  pivot_longer(!uid, names_to="rating", values_to="person_mean") %>%
+                  mutate(Rating = recode(rating, "avgPain_perSubj" = "Pain",
+                                                  "avgCat_perSubj" = "Catastrophizing",
+                                                  "avgCrave_perSubj" = "Craving")) %>%
+                 group_by(Rating) %>% mutate(overall_mean = mean(person_mean)) %>% ungroup()
+
+person_stats_plot<-ggplot(person_stats, aes(x = Rating, y = person_mean)) +
+  geom_boxplot(aes(fill = Rating, color=Rating)) +
+  geom_jitter(aes(color = Rating), size = 1, width = 0.1, height = 0.1, alpha = 0.5) +
+  scale_color_manual(values = c('#CC6633','#AD7CA9', '#669900')) +
+  scale_fill_manual(values = c('#FFDBBB','#DCBBF0', '#E1E9B7')) + 
+  guides(color="none", fill="none") +
+  labs(y = "Mean Rating") +
+  theme(text = element_text(size=8, color = 'black', family='Arial'),
+        axis.text.x = element_text(color='black'),
+        axis.title.x = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(color='grey80', fill=NA, size=1))
+ggsave("~/figures/person_means_plot-v5.tiff", plot = person_stats_plot, width = 3, height = 2.5, dpi = 300)
+```
+
+## Individual trace plots
+
+Plots broken up by:
+
+- All participants
+- Participants with increasing R2 only
+- Participants with no increase in R2
+- Participants without consistent model convergence
+
+```{r}
+# individual trace plots of raw pain/cat/crave
+rawPlot_all<-ggplot(dfMplus_clean, aes(x=clock)) +
+    geom_line(aes(y=CRAVE,color='red'), alpha = 0.5) +
+    geom_line(aes(y=CAT,color='green'), alpha = 0.5) +
+    geom_line(aes(y=PAIN,color='purple'), alpha = 0.5) +
+    labs(y = "Rating", x = "Time (s)") +
+    facet_wrap(~ uid, scales = "free_x") +
+    scale_color_identity(name = '',
+                       breaks = c('green', 'purple', 'red'),
+                       labels = c("CAT", "PAIN", "CRAVE"),
+                       guide = 'legend') +
+    theme(text = element_text(size=18, family='Arial'),
+        panel.background = element_blank(),
+        axis.text.x = element_text(size=10), 
+        panel.border = element_rect(color='grey30', fill=NA, size=1),
+        panel.grid.major = element_line(color="grey90"),
+        strip.background = element_blank(),
+        strip.text.x = element_blank())
+ggsave("~/figures/raw_data_plots-v3.tiff", plot = rawPlot_all, width = 20, height = 13, dpi = 300)
+
+# R2 increasing participants only
+dfR2inc_clean <- dfMplus_clean %>% filter(R2_flag == 1)
+rawPlot_R2inc<-ggplot(dfR2inc_clean, aes(x=clock)) +
+    geom_line(aes(y=CRAVE,color='red'), alpha = 0.5) +
+    geom_line(aes(y=CAT,color='green'), alpha = 0.5) +
+    geom_line(aes(y=PAIN,color='purple'), alpha = 0.5) +
+    labs(y = "Rating", x = "Time (s)") +
+    facet_wrap(~ uid, scales = "free_x") +
+    scale_color_identity(name = '',
+                       breaks = c('green', 'purple', 'red'),
+                       labels = c("CAT", "PAIN", "CRAVE"),
+                       guide = 'legend') +
+    theme(text = element_text(size=18, family='Arial'),
+        panel.background = element_blank(),
+        axis.text.x = element_text(size=10), 
+        panel.border = element_rect(color='grey30', fill=NA, size=1),
+        panel.grid.major = element_line(color="grey90"),
+        strip.background = element_blank(),
+        strip.text.x = element_blank())
+ggsave("~/figures/raw_data_plots_R2inc-v2.tiff", plot = rawPlot_R2inc, width = 20, height = 13, dpi = 300)
+
+# R2 not increasing participants only
+dfR2noInc_clean <- dfMplus_clean %>% filter(R2_flag == 0)
+rawPlot_R2noInc<-ggplot(dfR2noInc_clean, aes(x=clock)) +
+    geom_line(aes(y=CRAVE,color='red'), alpha = 0.5) +
+    geom_line(aes(y=CAT,color='green'), alpha = 0.5) +
+    geom_line(aes(y=PAIN,color='purple'), alpha = 0.5) +
+    labs(y = "Rating", x = "Time (s)") +
+    facet_wrap(~ uid, scales = "free_x") +
+    scale_color_identity(name = '',
+                       breaks = c('green', 'purple', 'red'),
+                       labels = c("CAT", "PAIN", "CRAVE"),
+                       guide = 'legend') +
+    theme(text = element_text(size=18, family='Arial'),
+        panel.background = element_blank(),
+        axis.text.x = element_text(size=10), 
+        panel.border = element_rect(color='grey30', fill=NA, size=1),
+        panel.grid.major = element_line(color="grey90"),
+        strip.background = element_blank(),
+        strip.text.x = element_blank())
+ggsave("~/figures/raw_data_plots_R2noInc-v2.tiff", plot = rawPlot_R2noInc, width = 20, height = 13, dpi = 300)
+
+# participants with models that did not converge:
+uid_noConverge <- c(398, 563, 572, 163, 335, 348, 831)
+df_noConverge <- mplus_data_nomiss %>% 
+          mutate(across(everything(), ~ na_if(., -99))) %>%
+          filter(uid %in% uid_noConverge)
+raw_plot_noModels<-ggplot(df_noConverge, aes(x=clock)) +
+    geom_line(aes(y=CRAVE,color='red'), alpha = 0.5) +
+    geom_line(aes(y=CAT,color='green'), alpha = 0.5) +
+    geom_line(aes(y=PAIN,color='purple'), alpha = 0.5) +
+    labs(y = "Rating", x = "Time (s)") +
+    facet_wrap(~ uid, scales = "free_x") +
+    scale_color_identity(name = '',
+                       breaks = c('green', 'purple', 'red'),
+                       labels = c("CAT", "PAIN", "CRAVE"),
+                       guide = 'legend') +
+    theme(text = element_text(size=18, family='Arial'),
+        panel.background = element_blank(),
+        axis.text.x = element_text(size=10), 
+        panel.border = element_rect(color='grey30', fill=NA, size=1),
+        panel.grid.major = element_line(color="grey90"),
+        strip.background = element_blank(),
+        strip.text.x = element_blank())
+ggsave("~/figures/raw_data_plots_noModels-v2.tiff", plot = raw_plot_noModels, width = 20, height = 13, dpi = 300)
+```
+
+## Caterpillar plot of Model 2 estimates
+
+```{r}
+# rename models from 0-2 to 1-3
+m0_STDYXresults$Model <- 'Model 1'
+m1_STDYXresults$Model <- 'Model 2'
+m2_STDYXresults$Model <- 'Model 3'
+
+# merge all idiographic STDYX model estimates across all participants
+all_STDYXresults <- rbind(m0_STDYXresults,m1_STDYXresults,m2_STDYXresults)
+
+# rename label column
+levelsList <- c("CRAVE.ON.DAY","CRAVE.ON.SURVEY","CRAVE.ON.CRAVE&1","SURVEY.WITH.DAY","Means.DAY","Means.SURVEY",
+                "Intercepts.CRAVE","Residual.Variances.CRAVE","PAIN.ON.DAY","PAIN.ON.SURVEY","PAIN.ON.PAIN&1","PAIN.ON.CRAVE&1",
+                "CRAVE.ON.PAIN&1","PAIN.WITH.CRAVE","Intercepts.PAIN","Residual.Variances.PAIN","CRAVE.ON.CAT&1","CAT.ON.DAY",
+                "CAT.ON.SURVEY","CAT.ON.CAT&1","CRAVE.WITH.CAT","CRAVE.WITH.PAIN","PAIN.WITH.CAT","Intercepts.CAT",
+                "Residual.Variances.CAT")
+labelList <- c("Crave on Day","Crave on Survey","Crave_t on Crave_t-1","Survey with Day","Fixed Effect of Day",
+               "Fixed Effect of Survey","Crave Intercept","Crave Residual Variance","Pain on Day","Pain on Survey",
+               "Pain_t on Pain_t-1","Pain_t on Crave_t-1","Crave_t on Pain_t-1","Crave with Pain","Pain Intercept",
+               "Pain Residual Variance","Crave_t on Cat_t-1","Cat on Day","Cat on Survey","Cat_t on Cat_t-1","Crave with Cat",
+               "Crave with Pain","Pain with Cat","Cat Intercept","Cat Residual Variance")
+all_STDYXresults$label2 <- factor(all_STDYXresults$label, levels = levelsList, labels = labelList)
+
+# pivot df of all R2 CRAVE results to long format
+all_R2_crave_long <- all_R2_crave %>%
+  pivot_longer(
+    cols = c(m0, m1, m2),
+    names_to = "Model",
+    values_to = "R2"
+  ) %>%
+  mutate(
+    flag = factor(flag,
+                  levels = c(0, 1),
+                  labels = c("No Increasing Model Fit", "Increasing Model Fit")),
+    Model = factor(Model,
+                   levels = c("m0", "m1", "m2"),
+                   labels = c("Model 1", "Model 2", "Model 3"))
+  )
+
+# get subset to select only IDs and R2 flag columns
+uid_flag <- all_R2_crave_long %>% select(c(uid, flag)) %>% rename(ID = uid) %>% group_by(ID) %>% summarise(flag = unique(flag)) %>% ungroup()
+# merge all idiographic STDYX model estimates across all participants with corresponding participants' R2 flag
+all_STDYXresults_2 <- merge(all_STDYXresults, uid_flag, by = "ID", all = TRUE)
+
+# PLOT
+# caterpillar plot labels of interest
+catPlot_labs <- c("Crave_t on Crave_t-1", "Crave_t on Pain_t-1","Crave_t on Cat_t-1","Crave with Pain","Crave with Cat","Pain with Cat") 
+# caterpillar plot of specific labels
+dfCatPlt <- all_STDYXresults_2 %>% filter(label2 %in% catPlot_labs) %>% filter(Model == "Model 3") %>%
+                                mutate(ID = fct_reorder(factor(ID), est, .fun = median, na.rm = TRUE, .desc = TRUE)) 
+dfCatPlt$label2 <- factor(dfCatPlt$label2, levels = catPlot_labs)
+dfCatPlt$sig2 <- factor(dfCatPlt$sig, levels = c(TRUE, FALSE), labels = c("Significant","Not Significant"))
+
+# custom legend key:
+draw_key_errorbarh_point <- function(data, params, size) {
+  col <- if (!is.null(data$colour)) data$colour else "black"
+  alp <- if (!is.null(data$alpha)) data$alpha else 1
+  lwd <- if (!is.null(data$size)) data$size * ggplot2::.pt else 0.5 * ggplot2::.pt
+  gp_line <- grid::gpar(col = scales::alpha(col, alp), lwd = lwd, lineend = "butt")
+  gp_point <- grid::gpar(col = scales::alpha(col, alp), fill = scales::alpha(col, alp),
+  fontsize = 2 * ggplot2::.pt)
+  grid::grobTree(
+  # horizontal shaft
+  grid::segmentsGrob(x0 = unit(0.1, "npc"), x1 = unit(0.9, "npc"),
+  y0 = unit(0.5, "npc"), y1 = unit(0.5, "npc"),
+  gp = gp_line),
+  # point in middle
+  grid::pointsGrob(x = unit(0.5, "npc"), y = unit(0.5, "npc"),
+  pch = 16, gp = gp_point)
+  )
+}
+
+# plot
+catPlot<-ggplot(dfCatPlt, aes(x = factor(ID), group = sig2)) +
+  geom_linerange(aes(ymin = lower_2.5ci, ymax = upper_2.5ci, color = sig2), size = 0.75, 
+                 position = position_dodge(width = .75), key_glyph = draw_key_errorbarh_point) +
+  geom_point(aes(y = est, color = sig2), size = 1.5, position = position_dodge(width = .75), show.legend = FALSE) + # legend provided by linerange's custom key
+  scale_color_manual(values = c('#669900','#AD7CA9')) +
+  geom_hline(yintercept=0, color = "grey70", linetype = "dashed") +
+  coord_flip() +
+  facet_wrap(~label2) +
+  labs(y = "Estimate (95% CI)") +
+  theme(text = element_text(size=16, family='Arial'),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="top",
+        legend.title=element_blank(),
+        panel.background = element_blank(),
+        strip.background = element_rect(color = "grey30",fill = "grey90",size = 1),
+        strip.text = element_text(color = "black"),
+        panel.border = element_rect(color='grey30', fill=NA, size=1))
+ggsave("~/figures/caterpillar_plot-v6.tiff", plot = catPlot, width = 8.5, height = 7, dpi = 300)
+```
+
+## Idiographic increasing model fit plot
+
+```{r}
+R2_plot <- ggplot(all_R2_crave_long, aes(x=Model, y=R2, group=uid, color=factor(flag))) + 
+  geom_line() +
+  facet_wrap(~ flag) +
+  labs(y = expression(R^2)) + #, color="Model Fit") +
+  scale_color_manual(values=c("#669900", "#AD7CA9")) +
+  theme(text = element_text(size=9, family='Arial'),
+        panel.background = element_blank(),
+        legend.position="none",
+        axis.title.x = element_blank(),
+        panel.grid.major = element_line(color="grey90"),
+        panel.grid.minor = element_line(color="grey90"),
+        panel.border = element_rect(color='grey80', fill=NA, size=1))
+ggsave("~/figures/R2_plot-v5.tiff", plot = R2_plot, width = 4, height = 2.5, dpi = 600)
+```
+
+## Miscellaneous statistics and comparisons
+
+```{r}
+# EMA compliance for random prompts 
+allEMA_compliance <- ema_data %>% filter(uid %in% participant_ls)
+# each participant expected to contribute 12 wks * 7 days * 3 ema/day = 252 EMAs
+# total expected for 40 participants = 10,080
+EMA_compliance <- allEMA_compliance %>% filter(!EMA_TYPE_SELF_INIT == 1) %>% group_by(uid) %>%
+                      summarise(ema_count = n(),
+                             frac_EMA = ema_count/252)
+
+# EMA compliance by participant
+meanComp <- mean(EMA_compliance$frac_EMA)
+meanComp
+medComp <- median(EMA_compliance$frac_EMA)
+medComp
+sdComp <- sd(EMA_compliance$frac_EMA)
+sdComp
+minComp <- min(EMA_compliance$frac_EMA)
+minComp
+maxComp <- max(EMA_compliance$frac_EMA)
+maxComp
+
+# for those with increasing model fit across Models 0-2, find summary statistics
+R2_inc <- all_R2_crave %>% filter(flag ==1)
+
+mean(R2_inc$m2 - R2_inc$m0)   
+sd(R2_inc$m2 - R2_inc$m0)     
+min(R2_inc$m2 - R2_inc$m0)    
+max(R2_inc$m2 - R2_inc$m0)    
+
+
+# increasing fit
+craveAR_R1grp <- all_STDYXresults_2 %>% filter(Model == "Model 3" & flag == "Increasing Model Fit" & label == "CRAVE.ON.CRAVE&1") %>%
+                        summarise(meanCraveAR = mean(est),
+                                  SdCraveAR = sd(est))
+craveAR_R1grp
+
+# no increasing fit
+craveAR_R0grp <- all_STDYXresults_2 %>% filter(Model == "Model 3" & flag == "No Increasing Model Fit" & label == "CRAVE.ON.CRAVE&1") %>%
+                        summarise(meanCraveAR = mean(est),
+                                  SdCraveAR = sd(est))
+craveAR_R0grp
+```
