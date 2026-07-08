@@ -8,8 +8,6 @@ output: html_document
 # Libraries and Global Options
 
 ```{r setup, include=FALSE}
-rm(list=ls()) 
-
 library(psych)
 library(ggplot2)
 library(tidyr)
@@ -17,6 +15,14 @@ library(dplyr)
 library(MplusAutomation)
 library(forcats)
 library(tableone)
+
+# output R and package versions
+pkgs <- c("psych", "ggplot2", "tidyr", "dplyr", "MplusAutomation", "forcats", "tableone")
+versions_df <- data.frame(
+  package = c("R", pkgs),
+  version = c(R.version.string, sapply(pkgs, function(p) as.character(packageVersion(p))))
+)
+versions_df
 ```
 
 # Load and prepare data
