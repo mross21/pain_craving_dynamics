@@ -16,6 +16,8 @@ library(MplusAutomation)
 library(forcats)
 library(tableone)
 
+source("local_paths.R")
+
 # output R and package versions
 pkgs <- c("psych", "ggplot2", "tidyr", "dplyr", "MplusAutomation", "forcats", "tableone")
 versions_df <- data.frame(
@@ -29,7 +31,7 @@ versions_df
 
 ```{r}
 # Read in all EMA data
-ema_data <- read.csv("~/data/all_emas_X.csv") %>%
+ema_data <- read.csv(all_ema_path) %>%
                 arrange(uid, timestamp) %>% group_by(uid) %>% mutate(survey = seq(1:n()))
 
 # process dataframe for DSEM in Mplus
@@ -138,8 +140,12 @@ mplus_data_nomiss[is.na(mplus_data_nomiss)] <- -99
 # PLOT:
 # TYPE=PLOT2;
 
+# run Mplus model in R using R package MplusAutomation
+MplusAutomation::createModels(grp_input_path)
+runModels(group_output_dir, recursive = F)
+
 # Extract group model output
-grpResultsFile <- "~/groupOutput/mldsem5.out"
+grpResultsFile <- grp_results_path
 grpModel_results <- readModels(grpResultsFile, what = c("parameters","summaries"))
 grp_STDYXresults <- grpModel_results$parameters$stdyx.standardized
 grp_STDYXresults
@@ -198,14 +204,14 @@ grp_STDYXresults
 # PLOT: TYPE=PLOT2;
 
 # run Mplus model in R using R package MplusAutomation
-MplusAutomation::createModels("~/idiographicInput/m0input.txt")
-runModels("~/idiographicOutput/m0", recursive = T)
+MplusAutomation::createModels(m0_input_path)
+runModels(m0_output_path, recursive = T)
 ```
 
 ## Results
 
 ```{r message = F, warning = F}
-m0Path <- '~/idiographicOutput/m0/'
+m0Path <- m0_output_path
 # get all model result parameters for all IDs
 m0Estimates <- readModels(m0Path, recursive = TRUE, what = "parameters")
 
@@ -235,7 +241,7 @@ m0_STDYXresults <- plyr::ldply(m0_allParameters$stdyx.standardized, rbind) %>%
 ## PSR
 
 ```{r message = F, warning = F}
-m0Path <- '~/idiographicOutput/m0/'
+m0Path <- m0_output_path
 # get tech8 for all IDs
 m0tech8 <- readModels(m0Path, recursive = TRUE, what = "tech8")
 
@@ -355,14 +361,14 @@ m0_Err
 
 
 # run Mplus model in R using R package MplusAutomation
-MplusAutomation::createModels("~/idiographicInput/m1input.txt") # point it to the right folder (where your .txt file with mplus input is located)
-runModels("~/idiographicOutput/m1", recursive = T)
+MplusAutomation::createModels(m1_input_path) # point it to the right folder (where your .txt file with mplus input is located)
+runModels(m1_output_path, recursive = T)
 ```
 
 ## Results
 
 ```{r message = F, warning = F}
-m1Path <- '~/idiographicOutput/m1/'
+m1Path <- m1_output_path
 # get all model result parameters for all IDs
 m1Estimates <- readModels(m1Path, recursive = TRUE, what = "parameters")
 
@@ -394,7 +400,7 @@ m1_STDYXresults <- plyr::ldply(m1_allParameters$stdyx.standardized, rbind) %>%
 ## PSR
 
 ```{r message = F, warning = F}
-m1Path <- '~/idiographicOutput/m1/'
+m1Path <- m1_output_path
 # get tech8 for all IDs
 m1tech8 <- readModels(m1Path, recursive = TRUE, what = "tech8")
 
@@ -520,14 +526,14 @@ m1_Err
 
 
 # run Mplus model in R using R package MplusAutomation
-MplusAutomation::createModels("~/idiographicInput/m2input.txt") # point it to the right folder (where your .txt file with mplus input is located)
-runModels("~/idiographicOutput/m2", recursive = T)
+MplusAutomation::createModels(m2_input_path) # point it to the right folder (where your .txt file with mplus input is located)
+runModels(m2_output_path, recursive = T)
 ```
 
 ## Results
 
 ```{r message = F, warning = F}
-m2Path <- '~/idiographicOutput/m2/'
+m2Path <- m2_output_path
 # get all model result parameters for all IDs
 m2Estimates <- readModels(m2Path, recursive = TRUE, what = "parameters")
 
@@ -559,7 +565,7 @@ m2_STDYXresults <- plyr::ldply(m2_allParameters$stdyx.standardized, rbind) %>%
 ## PSR
 
 ```{r message = F, warning = F}
-m2Path <- '~/idiographicOutput/m2/'
+m2Path <- m2_output_path
 # get tech8 for all IDs
 m2tech8 <- readModels(m2Path, recursive = TRUE, what = "tech8")
 
@@ -661,6 +667,8 @@ print(all_R2_crave %>% filter(flag == 1))
 
 # list IDs with R2 not increasing
 print(all_R2_crave %>% filter(flag == 0))
+
+write.csv(all_R2_crave, all_r2_crave_path, row.names = FALSE)
 ```
 
 # Table of all idiographic model parameter results
@@ -702,7 +710,7 @@ Flag:
 
 ```{r}
 # participant demographics
-demo_file <- read.csv("~/data/DSEM_participant_demographics.csv")
+demo_file <- read.csv(demographics_path)
 
 dfMplus <- mplus_data_nomiss %>%
   mutate(across(everything(), ~ na_if(., -99))) %>%  # replace -99 with NA
@@ -716,6 +724,8 @@ dfMplus <- mplus_data_nomiss %>%
 # remove surveys with NA for PAIN, CAT, CRAVE
 dfMplus_clean <- dfMplus %>%
   filter(if_all(c(PAIN, CAT, CRAVE), ~ !is.na(.)))   
+
+write.csv(dfMplus_clean, dfMplus_clean_path, row.names = FALSE)
 
 # list of participant IDs
 participant_ls <- unique(dfMplus_clean$uid)
@@ -760,7 +770,7 @@ person_stats_plot<-ggplot(person_stats, aes(x = Rating, y = person_mean)) +
         axis.title.x = element_blank(),
         panel.background = element_blank(),
         panel.border = element_rect(color='grey80', fill=NA, size=1))
-ggsave("~/figures/person_means_plot-v5.tiff", plot = person_stats_plot, width = 3, height = 2.5, dpi = 300)
+ggsave(person_means_plot_path, plot = person_stats_plot, width = 3, height = 2.5, dpi = 300)
 ```
 
 ## Individual trace plots
@@ -791,7 +801,7 @@ rawPlot_all<-ggplot(dfMplus_clean, aes(x=clock)) +
         panel.grid.major = element_line(color="grey90"),
         strip.background = element_blank(),
         strip.text.x = element_blank())
-ggsave("~/figures/raw_data_plots-v3.tiff", plot = rawPlot_all, width = 20, height = 13, dpi = 300)
+ggsave(raw_data_plots_path, plot = rawPlot_all, width = 20, height = 13, dpi = 300)
 
 # R2 increasing participants only
 dfR2inc_clean <- dfMplus_clean %>% filter(R2_flag == 1)
@@ -812,7 +822,7 @@ rawPlot_R2inc<-ggplot(dfR2inc_clean, aes(x=clock)) +
         panel.grid.major = element_line(color="grey90"),
         strip.background = element_blank(),
         strip.text.x = element_blank())
-ggsave("~/figures/raw_data_plots_R2inc-v2.tiff", plot = rawPlot_R2inc, width = 20, height = 13, dpi = 300)
+ggsave(raw_data_plots_r2inc_path, plot = rawPlot_R2inc, width = 20, height = 13, dpi = 300)
 
 # R2 not increasing participants only
 dfR2noInc_clean <- dfMplus_clean %>% filter(R2_flag == 0)
@@ -833,7 +843,7 @@ rawPlot_R2noInc<-ggplot(dfR2noInc_clean, aes(x=clock)) +
         panel.grid.major = element_line(color="grey90"),
         strip.background = element_blank(),
         strip.text.x = element_blank())
-ggsave("~/figures/raw_data_plots_R2noInc-v2.tiff", plot = rawPlot_R2noInc, width = 20, height = 13, dpi = 300)
+ggsave(raw_data_plots_r2noinc_path, plot = rawPlot_R2noInc, width = 20, height = 13, dpi = 300)
 
 # participants with models that did not converge:
 uid_noConverge <- c(398, 563, 572, 163, 335, 348, 831)
@@ -857,7 +867,7 @@ raw_plot_noModels<-ggplot(df_noConverge, aes(x=clock)) +
         panel.grid.major = element_line(color="grey90"),
         strip.background = element_blank(),
         strip.text.x = element_blank())
-ggsave("~/figures/raw_data_plots_noModels-v2.tiff", plot = raw_plot_noModels, width = 20, height = 13, dpi = 300)
+ggsave(raw_plot_nomodels_path, plot = raw_plot_noModels, width = 20, height = 13, dpi = 300)
 ```
 
 ## Caterpillar plot of Model 2 estimates
@@ -953,7 +963,7 @@ catPlot<-ggplot(dfCatPlt, aes(x = factor(ID), group = sig2)) +
         strip.background = element_rect(color = "grey30",fill = "grey90",size = 1),
         strip.text = element_text(color = "black"),
         panel.border = element_rect(color='grey30', fill=NA, size=1))
-ggsave("~/figures/caterpillar_plot-v6.tiff", plot = catPlot, width = 8.5, height = 7, dpi = 300)
+ggsave(caterpillar_plot_path, plot = catPlot, width = 8.5, height = 7, dpi = 300)
 ```
 
 ## Idiographic increasing model fit plot
@@ -971,7 +981,7 @@ R2_plot <- ggplot(all_R2_crave_long, aes(x=Model, y=R2, group=uid, color=factor(
         panel.grid.major = element_line(color="grey90"),
         panel.grid.minor = element_line(color="grey90"),
         panel.border = element_rect(color='grey80', fill=NA, size=1))
-ggsave("~/figures/R2_plot-v5.tiff", plot = R2_plot, width = 4, height = 2.5, dpi = 600)
+ggsave(r2_plot_path, plot = R2_plot, width = 4, height = 2.5, dpi = 600)
 ```
 
 ## Miscellaneous statistics and comparisons
@@ -1017,4 +1027,20 @@ craveAR_R0grp <- all_STDYXresults_2 %>% filter(Model == "Model 3" & flag == "No 
                         summarise(meanCraveAR = mean(est),
                                   SdCraveAR = sd(est))
 craveAR_R0grp
+```
+
+### Determine maximum craving of substances by type
+
+```{r}
+df_filtered <- ema_data[ema_data$uid %in% participant_ls, ]
+cols <- c("CRAVING_HEROIN", "CRAVING_COCAINE", "CRAVING_METH")
+
+row_max <- apply(df_filtered[cols], 1, function(x) if (all(is.na(x))) NA else max(x, na.rm = TRUE))
+is_max <- sweep(df_filtered[cols], 1, row_max, FUN = "==")
+
+max_counts <- colSums(is_max, na.rm = TRUE)
+print(max_counts)
+
+cat(sprintf("total count: %d\n", nrow(df_filtered[cols])))
+cat(sprintf("proportion of opioids as max: %f\n", max_counts["CRAVING_HEROIN"] / nrow(df_filtered[cols])))
 ```
