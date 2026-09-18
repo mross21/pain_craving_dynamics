@@ -1007,6 +1007,8 @@ minComp
 maxComp <- max(EMA_compliance$frac_EMA)
 maxComp
 
+
+###########################################################################################
 # for those with increasing model fit across Models 0-2, find summary statistics
 R2_inc <- all_R2_crave %>% filter(flag ==1)
 
@@ -1014,7 +1016,6 @@ mean(R2_inc$m2 - R2_inc$m0)
 sd(R2_inc$m2 - R2_inc$m0)     
 min(R2_inc$m2 - R2_inc$m0)    
 max(R2_inc$m2 - R2_inc$m0)    
-
 
 # increasing fit
 craveAR_R1grp <- all_STDYXresults_2 %>% filter(Model == "Model 3" & flag == "Increasing Model Fit" & label == "CRAVE.ON.CRAVE&1") %>%
@@ -1027,20 +1028,38 @@ craveAR_R0grp <- all_STDYXresults_2 %>% filter(Model == "Model 3" & flag == "No 
                         summarise(meanCraveAR = mean(est),
                                   SdCraveAR = sd(est))
 craveAR_R0grp
-```
 
-### Determine maximum craving of substances by type
 
-```{r}
-df_filtered <- ema_data[ema_data$uid %in% participant_ls, ]
-cols <- c("CRAVING_HEROIN", "CRAVING_COCAINE", "CRAVING_METH")
+###########################################################################################
+# Determine maximum craving of substances by type
+ema_filtered <- ema_data[ema_data$uid %in% participant_ls, ]
+crave_cols <- c("CRAVING_HEROIN", "CRAVING_COCAINE", "CRAVING_METH")
 
-row_max <- apply(df_filtered[cols], 1, function(x) if (all(is.na(x))) NA else max(x, na.rm = TRUE))
-is_max <- sweep(df_filtered[cols], 1, row_max, FUN = "==")
+crave_row_max <- apply(ema_filtered[crave_cols], 1, function(x) if (all(is.na(x))) NA else max(x, na.rm = TRUE))
+is_max_crave <- sweep(ema_filtered[crave_cols], 1, crave_row_max, FUN = "==")
 
-max_counts <- colSums(is_max, na.rm = TRUE)
-print(max_counts)
+max_crave_counts <- colSums(is_max_crave, na.rm = TRUE)
+print(max_crave_counts)
 
-cat(sprintf("total count: %d\n", nrow(df_filtered[cols])))
-cat(sprintf("proportion of opioids as max: %f\n", max_counts["CRAVING_HEROIN"] / nrow(df_filtered[cols])))
+cat(sprintf("total count: %d\n", nrow(dfMplus_clean)))
+cat(sprintf("proportion of opioids as max: %f\n", max_crave_counts["CRAVING_HEROIN"] / nrow(dfMplus_clean)))
+
+
+###########################################################################################
+# Proportion of EMA where pain not equal to zero
+is_pain <- ifelse(dfMplus_clean$PAIN > 0, 1, 0)
+print(sum(is_pain))
+print(nrow(dfMplus_clean))
+print(sum(is_pain) / nrow(dfMplus_clean))
+
+cat(sprintf("pain > 0 count: %d\n", sum(is_pain)))
+cat(sprintf("total count: %d\n", nrow(dfMplus_clean)))
+cat(sprintf("proportion of pain > 0: %f\n", sum(is_pain) / nrow(dfMplus_clean)))
+
+# get rates by participant
+pain_rates <- dfMplus_clean %>% group_by(uid) %>% 
+  mutate(pain_binary = ifelse(PAIN > 0, 1, 0)) %>%
+  summarise(pain_count = sum(pain_binary),
+            total = n(),
+            pain_nonzero_rate = pain_count/total)
 ```
